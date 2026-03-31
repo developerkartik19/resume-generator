@@ -1,0 +1,1071 @@
+<!DOCTYPE html>
+<!--
+  index.html - The Complete Frontend
+  ====================================
+  This single file contains everything the user sees and interacts with.
+  We use vanilla HTML/CSS/JS (no frameworks) to keep things simple and
+  deployable anywhere — no build step needed.
+
+  WHAT'S INSIDE:
+  1. HTML structure: Chat container, message list, input area
+  2. CSS styling: Dark editorial theme with animated chat bubbles
+  3. JavaScript: Sends messages to Flask, renders responses, handles resume download
+
+  HOW FRONTEND TALKS TO BACKEND:
+  The JavaScript uses the Fetch API to send POST requests to /chat.
+  It sends { message, session_id } and receives { reply, done, resume }.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Resume Builder</title>
+
+  <!-- Google Fonts: Fraunces (editorial serif display) + DM Mono (code/labels) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,600;0,9..144,800;1,9..144,400&family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet" />
+
+  <style>
+    /* ================================================================
+       CSS CUSTOM PROPERTIES (Variables)
+       Define colors once, use everywhere. Easy to retheme.
+    ================================================================ */
+    :root {
+      --bg:           #0d0f14;       /* Deep near-black background */
+      --surface:      #161921;       /* Card/panel surface */
+      --surface2:     #1e2130;       /* Slightly lighter surface */
+      --border:       #2a2f3e;       /* Subtle border color */
+      --accent:       #e8c76b;       /* Gold accent — resume/document feel */
+      --accent2:      #5b8dee;       /* Blue for bot messages */
+      --user-bubble:  #1e2a1e;       /* Dark green tint for user messages */
+      --bot-bubble:   #161d2e;       /* Dark blue tint for bot messages */
+      --text:         #e8eaf0;       /* Primary text */
+      --text-muted:   #6b7080;       /* Secondary/muted text */
+      --text-dim:     #3a3f50;       /* Very dim text */
+      --font-display: 'Fraunces', Georgia, serif;
+      --font-body:    'DM Sans', system-ui, sans-serif;
+      --font-mono:    'DM Mono', monospace;
+      --radius:       12px;
+      --radius-sm:    6px;
+      --shadow:       0 4px 24px rgba(0,0,0,0.4);
+    }
+
+    /* ================================================================
+       RESET & BASE
+    ================================================================ */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-body);
+      font-size: 15px;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Subtle noise texture on the background */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ================================================================
+       LAYOUT — App Shell
+    ================================================================ */
+    .app {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      max-width: 800px;
+      margin: 0 auto;
+      position: relative;
+      z-index: 1;
+    }
+
+    /* ================================================================
+       HEADER
+    ================================================================ */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 20px 28px 16px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+      flex-shrink: 0;
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .logo {
+      width: 40px;
+      height: 40px;
+      background: var(--accent);
+      border-radius: var(--radius-sm);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      flex-shrink: 0;
+    }
+
+    .header-title {
+      font-family: var(--font-display);
+      font-weight: 600;
+      font-size: 1.15rem;
+      letter-spacing: -0.02em;
+      color: var(--text);
+    }
+
+    .header-subtitle {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+      letter-spacing: 0.05em;
+    }
+
+    .header-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .btn-ghost {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      padding: 6px 14px;
+      border-radius: var(--radius-sm);
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      letter-spacing: 0.03em;
+    }
+
+    .btn-ghost:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    /* Status indicator (pulsing dot) */
+    .status-dot {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.72rem;
+      font-family: var(--font-mono);
+      color: var(--text-muted);
+    }
+
+    .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #4caf7d;
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    /* ================================================================
+       PROGRESS BAR
+       Shows how far through the 10 questions the user is
+    ================================================================ */
+    .progress-bar-container {
+      padding: 0 28px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      height: 36px;
+      flex-shrink: 0;
+    }
+
+    .progress-label {
+      font-family: var(--font-mono);
+      font-size: 0.68rem;
+      color: var(--text-muted);
+      white-space: nowrap;
+    }
+
+    .progress-track {
+      flex: 1;
+      height: 3px;
+      background: var(--border);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: var(--accent);
+      border-radius: 2px;
+      transition: width 0.5s ease;
+      width: 0%;
+    }
+
+    /* ================================================================
+       CHAT MESSAGES AREA
+    ================================================================ */
+    .messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 28px 28px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      scroll-behavior: smooth;
+    }
+
+    /* Custom scrollbar */
+    .messages::-webkit-scrollbar { width: 4px; }
+    .messages::-webkit-scrollbar-track { background: transparent; }
+    .messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    /* ================================================================
+       MESSAGE BUBBLES
+       .message-row wraps the bubble + timestamp
+       .message is the bubble itself
+    ================================================================ */
+    .message-row {
+      display: flex;
+      flex-direction: column;
+      max-width: 75%;
+      animation: slideIn 0.25s ease forwards;
+      opacity: 0;
+      transform: translateY(8px);
+    }
+
+    @keyframes slideIn {
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Bot messages are left-aligned */
+    .message-row.bot {
+      align-self: flex-start;
+      align-items: flex-start;
+    }
+
+    /* User messages are right-aligned */
+    .message-row.user {
+      align-self: flex-end;
+      align-items: flex-end;
+    }
+
+    .message-role {
+      font-family: var(--font-mono);
+      font-size: 0.65rem;
+      color: var(--text-dim);
+      margin-bottom: 5px;
+      letter-spacing: 0.06em;
+    }
+
+    .message {
+      padding: 13px 17px;
+      border-radius: var(--radius);
+      font-size: 0.92rem;
+      line-height: 1.65;
+      white-space: pre-wrap;       /* Preserves line breaks in bot messages */
+      word-break: break-word;
+    }
+
+    .message.bot {
+      background: var(--bot-bubble);
+      border: 1px solid var(--border);
+      border-bottom-left-radius: 3px;
+      color: var(--text);
+    }
+
+    .message.user {
+      background: var(--user-bubble);
+      border: 1px solid #2a3a2a;
+      border-bottom-right-radius: 3px;
+      color: var(--text);
+    }
+
+    /* Bold/strong text inside messages */
+    .message strong {
+      color: var(--accent);
+      font-weight: 600;
+    }
+
+    .message em {
+      color: var(--text-muted);
+      font-style: italic;
+    }
+
+    /* ================================================================
+       TYPING INDICATOR
+       Three bouncing dots shown while bot is "thinking"
+    ================================================================ */
+    .typing-indicator {
+      display: none;           /* Hidden by default, shown via JS */
+      align-self: flex-start;
+      background: var(--bot-bubble);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      border-bottom-left-radius: 3px;
+      padding: 12px 18px;
+      gap: 5px;
+    }
+
+    .typing-indicator.visible {
+      display: flex;
+    }
+
+    .typing-dot {
+      width: 7px;
+      height: 7px;
+      background: var(--text-muted);
+      border-radius: 50%;
+      animation: typingBounce 1.2s infinite;
+    }
+
+    .typing-dot:nth-child(2) { animation-delay: 0.2s; }
+    .typing-dot:nth-child(3) { animation-delay: 0.4s; }
+
+    @keyframes typingBounce {
+      0%, 60%, 100% { transform: translateY(0); }
+      30% { transform: translateY(-6px); }
+    }
+
+    /* ================================================================
+       RESUME DISPLAY CARD
+       Shown after the bot generates the resume
+    ================================================================ */
+    .resume-card {
+      background: var(--surface2);
+      border: 1px solid var(--accent);
+      border-radius: var(--radius);
+      overflow: hidden;
+      animation: slideIn 0.35s ease forwards;
+      opacity: 0;
+    }
+
+    .resume-card-header {
+      background: var(--accent);
+      padding: 10px 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .resume-card-title {
+      font-family: var(--font-display);
+      font-weight: 600;
+      font-size: 0.85rem;
+      color: #0d0f14;
+      letter-spacing: -0.01em;
+    }
+
+    .resume-actions {
+      display: flex;
+      gap: 6px;
+    }
+
+    .btn-download {
+      background: #0d0f14;
+      color: var(--accent);
+      border: none;
+      padding: 5px 12px;
+      border-radius: 4px;
+      font-family: var(--font-mono);
+      font-size: 0.68rem;
+      cursor: pointer;
+      transition: opacity 0.2s;
+      letter-spacing: 0.04em;
+    }
+
+    .btn-download:hover { opacity: 0.8; }
+
+    .btn-copy {
+      background: rgba(0,0,0,0.2);
+      color: #0d0f14;
+      border: none;
+      padding: 5px 12px;
+      border-radius: 4px;
+      font-family: var(--font-mono);
+      font-size: 0.68rem;
+      cursor: pointer;
+      transition: opacity 0.2s;
+      letter-spacing: 0.04em;
+    }
+
+    .btn-copy:hover { opacity: 0.7; }
+
+    .resume-content {
+      padding: 20px;
+      font-family: var(--font-mono);
+      font-size: 0.78rem;
+      line-height: 1.8;
+      color: var(--text);
+      white-space: pre-wrap;
+      max-height: 420px;
+      overflow-y: auto;
+    }
+
+    .resume-content::-webkit-scrollbar { width: 3px; }
+    .resume-content::-webkit-scrollbar-thumb { background: var(--border); }
+
+    /* ================================================================
+       INPUT AREA (Bottom of screen)
+    ================================================================ */
+    .input-area {
+      padding: 16px 28px 20px;
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+
+    .input-wrapper {
+      display: flex;
+      gap: 10px;
+      align-items: flex-end;
+    }
+
+    .input-field {
+      flex: 1;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-family: var(--font-body);
+      font-size: 0.92rem;
+      padding: 13px 17px;
+      resize: none;
+      min-height: 48px;
+      max-height: 120px;
+      outline: none;
+      transition: border-color 0.2s;
+      line-height: 1.5;
+    }
+
+    .input-field:focus {
+      border-color: var(--accent);
+    }
+
+    .input-field::placeholder {
+      color: var(--text-dim);
+    }
+
+    .send-btn {
+      width: 48px;
+      height: 48px;
+      background: var(--accent);
+      border: none;
+      border-radius: var(--radius);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      transition: transform 0.15s, opacity 0.15s;
+      color: #0d0f14;
+      font-size: 1.1rem;
+    }
+
+    .send-btn:hover { transform: scale(1.05); }
+    .send-btn:active { transform: scale(0.96); }
+    .send-btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+    .input-hint {
+      font-size: 0.68rem;
+      color: var(--text-dim);
+      font-family: var(--font-mono);
+      margin-top: 7px;
+      text-align: right;
+      letter-spacing: 0.04em;
+    }
+
+    /* ================================================================
+       EMPTY STATE (before first message)
+    ================================================================ */
+    .empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      flex: 1;
+      color: var(--text-muted);
+      text-align: center;
+      padding: 40px;
+    }
+
+    .empty-icon {
+      font-size: 3rem;
+      opacity: 0.6;
+    }
+
+    .empty-title {
+      font-family: var(--font-display);
+      font-size: 1.3rem;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .empty-desc {
+      font-size: 0.85rem;
+      max-width: 320px;
+      line-height: 1.6;
+    }
+
+    .start-btn {
+      background: var(--accent);
+      color: #0d0f14;
+      border: none;
+      padding: 11px 28px;
+      border-radius: var(--radius);
+      font-family: var(--font-display);
+      font-weight: 600;
+      font-size: 0.95rem;
+      cursor: pointer;
+      transition: transform 0.15s;
+      margin-top: 6px;
+    }
+
+    .start-btn:hover { transform: translateY(-2px); }
+
+    /* ================================================================
+       RESPONSIVE — Mobile adjustments
+    ================================================================ */
+    @media (max-width: 600px) {
+      .header { padding: 14px 16px; }
+      .header-title { font-size: 1rem; }
+      .messages { padding: 16px 16px 10px; }
+      .message-row { max-width: 90%; }
+      .input-area { padding: 12px 16px 16px; }
+      .progress-bar-container { padding: 0 16px; }
+      .btn-ghost span { display: none; }
+    }
+
+    /* Toast notification for copy action */
+    .toast {
+      position: fixed;
+      bottom: 100px;
+      left: 50%;
+      transform: translateX(-50%) translateY(20px);
+      background: var(--surface2);
+      border: 1px solid var(--accent);
+      color: var(--accent);
+      padding: 8px 18px;
+      border-radius: 20px;
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      opacity: 0;
+      transition: all 0.3s;
+      pointer-events: none;
+      z-index: 100;
+    }
+
+    .toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+  </style>
+</head>
+
+<body>
+
+<!-- ================================================================
+     HTML STRUCTURE
+     The app has 5 main regions: header, progress, messages, typing, input
+================================================================ -->
+<div class="app">
+
+  <!-- HEADER: Logo, title, reset button -->
+  <header class="header">
+    <div class="header-left">
+      <div class="logo">📄</div>
+      <div>
+        <div class="header-title">AI Resume Builder</div>
+        <div class="header-subtitle">POWERED BY OPENAI GPT</div>
+      </div>
+    </div>
+    <div class="header-actions">
+      <div class="status-dot">
+        <div class="dot"></div>
+        <span>ONLINE</span>
+      </div>
+      <button class="btn-ghost" onclick="resetChat()">↺ <span>Reset</span></button>
+    </div>
+  </header>
+
+  <!-- PROGRESS BAR: Shows completion percentage -->
+  <div class="progress-bar-container">
+    <span class="progress-label" id="progressLabel">0 / 10</span>
+    <div class="progress-track">
+      <div class="progress-fill" id="progressFill"></div>
+    </div>
+  </div>
+
+  <!-- MESSAGES: Chat history goes here -->
+  <div class="messages" id="messages">
+    <!-- Empty state shown before chat starts -->
+    <div class="empty-state" id="emptyState">
+      <div class="empty-icon">✨</div>
+      <div class="empty-title">Build Your Resume with AI</div>
+      <div class="empty-desc">
+        Answer 10 quick questions and get a professional,
+        ATS-friendly resume generated in seconds.
+      </div>
+      <button class="start-btn" onclick="startChat()">Start Building →</button>
+    </div>
+  </div>
+
+  <!-- TYPING INDICATOR: Shown while waiting for bot response -->
+  <div class="typing-indicator" id="typingIndicator">
+    <div class="typing-dot"></div>
+    <div class="typing-dot"></div>
+    <div class="typing-dot"></div>
+  </div>
+
+  <!-- INPUT AREA: Text input + send button -->
+  <div class="input-area">
+    <div class="input-wrapper">
+      <textarea
+        id="userInput"
+        class="input-field"
+        placeholder="Type your answer here..."
+        rows="1"
+        disabled
+      ></textarea>
+      <button class="send-btn" id="sendBtn" onclick="sendMessage()" disabled>
+        ➤
+      </button>
+    </div>
+    <div class="input-hint">Press Enter to send · Shift+Enter for new line</div>
+  </div>
+
+</div>
+
+<!-- Toast notification -->
+<div class="toast" id="toast">Copied to clipboard!</div>
+
+
+<!-- ================================================================
+     JAVASCRIPT — The Brain of the Frontend
+     
+     This script:
+     1. Manages a unique session ID for this browser tab
+     2. Sends user messages to the Flask backend via fetch()
+     3. Renders bot replies with markdown-like formatting
+     4. Shows the resume in a nice card with download/copy buttons
+     5. Handles the progress bar, typing indicator, etc.
+================================================================ -->
+<script>
+  // ----------------------------------------------------------------
+  // SESSION ID
+  // Each browser tab gets a unique session ID so multiple users
+  // can use the app simultaneously without mixing up their data.
+  // We use sessionStorage so it's cleared when the tab is closed.
+  // ----------------------------------------------------------------
+  let sessionId = sessionStorage.getItem('resumeSessionId');
+  if (!sessionId) {
+    // Generate a random ID like "sess_a3f7b2c1"
+    sessionId = 'sess_' + Math.random().toString(36).substring(2, 10);
+    sessionStorage.setItem('resumeSessionId', sessionId);
+  }
+
+  // --- Backend URL ---
+  // During local development this points to our Flask server.
+  // When deployed, change this to your Render backend URL.
+  // We try to auto-detect: if running locally, use localhost.
+    const BACKEND_URL = 'http://localhost:5000';
+
+  // --- State ---
+  let chatStarted = false;
+  let currentStep = 0;
+  const TOTAL_STEPS = 10;
+
+  // ----------------------------------------------------------------
+  // START CHAT
+  // Called when user clicks "Start Building →"
+  // Sends an initial message to trigger the first question
+  // ----------------------------------------------------------------
+  async function startChat() {
+    // Hide empty state
+    document.getElementById('emptyState').remove();
+
+    // Enable input
+    enableInput();
+    chatStarted = true;
+
+    // Send a "hello" to trigger the welcome message + first question
+    await sendToBackend('hello');
+  }
+
+  // ----------------------------------------------------------------
+  // SEND MESSAGE
+  // Main function that handles user typing and hitting send
+  // ----------------------------------------------------------------
+  async function sendMessage() {
+    const input = document.getElementById('userInput');
+    const message = input.value.trim();
+
+    // Validation: don't send empty messages
+    if (!message) {
+      shakeInput();
+      return;
+    }
+
+    // Clear input and disable while waiting
+    input.value = '';
+    input.style.height = 'auto';
+    disableInput();
+
+    // Show user's message in the chat
+    appendMessage('user', message);
+
+    // Send to backend and handle response
+    await sendToBackend(message);
+  }
+
+  // ----------------------------------------------------------------
+  // SEND TO BACKEND
+  // The actual fetch() call to our Flask API
+  //
+  // HOW IT WORKS:
+  // 1. Show typing indicator (3 bouncing dots)
+  // 2. POST { message, session_id } to /chat
+  // 3. Parse the JSON response
+  // 4. If done=true, show resume card
+  // 5. Else show bot's next question
+  // 6. Re-enable input
+  // ----------------------------------------------------------------
+  async function sendToBackend(message) {
+    showTyping();
+
+    try {
+      // --- Fetch API Call ---
+      // We send a POST request with a JSON body.
+      // 'credentials: include' sends our session cookie along.
+      const response = await fetch(`${BACKEND_URL}/chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        credentials: 'include',
+        body: JSON.stringify({
+          message: message,
+          session_id: sessionId
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Server returned ${response.status}`);
+      }
+
+      // Parse the JSON response from Flask
+      const data = await response.json();
+      // data looks like: { reply: "...", step: 3, done: false, resume: null }
+
+      hideTyping();
+
+      // Small delay for natural feel
+      await sleep(300);
+
+      // Update progress bar
+      updateProgress(data.step);
+
+      // Show bot reply
+      if (data.reply) {
+        appendMessage('bot', data.reply);
+      }
+
+      // If resume is ready, show it in a special card
+      if (data.done && data.resume) {
+        await sleep(500);
+        appendResumeCard(data.resume);
+        disableInput();
+        updateProgress(TOTAL_STEPS);
+        return;
+      }
+
+      // Re-enable input for next answer
+      enableInput();
+
+    } catch (error) {
+      hideTyping();
+      console.error('Error:', error);
+
+      // Show a user-friendly error message
+      appendMessage('bot', 
+        '⚠️ Connection error. Make sure the backend is running at ' + 
+        BACKEND_URL + '\n\nTry refreshing the page.');
+      enableInput();
+    }
+  }
+
+  // ----------------------------------------------------------------
+  // APPEND MESSAGE
+  // Creates and inserts a message bubble into the chat
+  // ----------------------------------------------------------------
+  function appendMessage(role, text) {
+    const messagesDiv = document.getElementById('messages');
+
+    const row = document.createElement('div');
+    row.className = `message-row ${role}`;
+
+    const roleLabel = document.createElement('div');
+    roleLabel.className = 'message-role';
+    roleLabel.textContent = role === 'bot' ? '🤖 RESUME BOT' : '👤 YOU';
+
+    const bubble = document.createElement('div');
+    bubble.className = `message ${role}`;
+
+    // Parse simple markdown: **bold** and *italic* and line breaks
+    bubble.innerHTML = parseMarkdown(text);
+
+    row.appendChild(roleLabel);
+    row.appendChild(bubble);
+    messagesDiv.appendChild(row);
+
+    // Scroll to bottom
+    scrollToBottom();
+  }
+
+  // ----------------------------------------------------------------
+  // APPEND RESUME CARD
+  // Shows the generated resume in a styled card with download button
+  // ----------------------------------------------------------------
+  function appendResumeCard(resumeText) {
+    const messagesDiv = document.getElementById('messages');
+
+    const card = document.createElement('div');
+    card.className = 'resume-card';
+
+    card.innerHTML = `
+      <div class="resume-card-header">
+        <span class="resume-card-title">📄 Your Generated Resume</span>
+        <div class="resume-actions">
+          <button class="btn-copy" onclick="copyResume(this)">Copy</button>
+          <button class="btn-download" onclick="downloadResume()">↓ Download .txt</button>
+        </div>
+      </div>
+      <div class="resume-content" id="resumeContent">${escapeHtml(resumeText)}</div>
+    `;
+
+    // Store resume text for download
+    window._resumeText = resumeText;
+
+    messagesDiv.appendChild(card);
+    scrollToBottom();
+
+    // Final success message
+    setTimeout(() => {
+      appendMessage('bot', 
+        '🎉 Your resume is ready!\n\n' +
+        '**Next steps:**\n' +
+        '• Click "Copy" to copy the text\n' +
+        '• Click "↓ Download .txt" to save it\n' +
+        '• Paste into Google Docs for further formatting\n\n' +
+        '*Want to build another? Click the Reset button above.*');
+      scrollToBottom();
+    }, 800);
+  }
+
+  // ----------------------------------------------------------------
+  // DOWNLOAD RESUME
+  // Creates a .txt file and triggers browser download
+  // ----------------------------------------------------------------
+  function downloadResume() {
+    if (!window._resumeText) return;
+
+    // Create a Blob (binary large object) containing the text
+    const blob = new Blob([window._resumeText], { type: 'text/plain' });
+
+    // Create a temporary download link and click it programmatically
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'resume.txt';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  // ----------------------------------------------------------------
+  // COPY RESUME
+  // Copies resume text to clipboard
+  // ----------------------------------------------------------------
+  async function copyResume(btn) {
+    if (!window._resumeText) return;
+    try {
+      await navigator.clipboard.writeText(window._resumeText);
+      showToast('Copied to clipboard!');
+    } catch (e) {
+      // Fallback for older browsers
+      const ta = document.createElement('textarea');
+      ta.value = window._resumeText;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      showToast('Copied!');
+    }
+  }
+
+  // ----------------------------------------------------------------
+  // RESET CHAT
+  // Clears the conversation and starts fresh
+  // ----------------------------------------------------------------
+  async function resetChat() {
+    try {
+      await fetch(`${BACKEND_URL}/reset`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ session_id: sessionId })
+      });
+    } catch (e) { /* Ignore reset errors */ }
+
+    // Clear messages and reload empty state
+    const messagesDiv = document.getElementById('messages');
+    messagesDiv.innerHTML = `
+      <div class="empty-state" id="emptyState">
+        <div class="empty-icon">✨</div>
+        <div class="empty-title">Build Your Resume with AI</div>
+        <div class="empty-desc">
+          Answer 10 quick questions and get a professional,
+          ATS-friendly resume generated in seconds.
+        </div>
+        <button class="start-btn" onclick="startChat()">Start Building →</button>
+      </div>
+    `;
+
+    disableInput();
+    updateProgress(0);
+    chatStarted = false;
+    window._resumeText = null;
+
+    // Generate new session ID
+    sessionId = 'sess_' + Math.random().toString(36).substring(2, 10);
+    sessionStorage.setItem('resumeSessionId', sessionId);
+  }
+
+  // ----------------------------------------------------------------
+  // HELPER FUNCTIONS
+  // ----------------------------------------------------------------
+
+  /** Update the progress bar and label */
+  function updateProgress(step) {
+    currentStep = step;
+    const pct = Math.min((step / TOTAL_STEPS) * 100, 100);
+    document.getElementById('progressFill').style.width = pct + '%';
+    document.getElementById('progressLabel').textContent =
+      step > 0 ? `${Math.min(step, TOTAL_STEPS)} / ${TOTAL_STEPS}` : '0 / 10';
+  }
+
+  /** Show the typing indicator (bouncing dots) */
+  function showTyping() {
+    document.getElementById('typingIndicator').classList.add('visible');
+    scrollToBottom();
+  }
+
+  /** Hide the typing indicator */
+  function hideTyping() {
+    document.getElementById('typingIndicator').classList.remove('visible');
+  }
+
+  /** Enable the input field and send button */
+  function enableInput() {
+    const input = document.getElementById('userInput');
+    const btn = document.getElementById('sendBtn');
+    input.disabled = false;
+    btn.disabled = false;
+    input.focus();
+  }
+
+  /** Disable the input field and send button */
+  function disableInput() {
+    document.getElementById('userInput').disabled = true;
+    document.getElementById('sendBtn').disabled = true;
+  }
+
+  /** Scroll the messages area to the bottom */
+  function scrollToBottom() {
+    const el = document.getElementById('messages');
+    el.scrollTop = el.scrollHeight;
+    // Extra scroll after animations settle
+    setTimeout(() => { el.scrollTop = el.scrollHeight; }, 350);
+  }
+
+  /** Promise-based sleep utility */
+  function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /** Show a brief toast notification */
+  function showToast(msg) {
+    const toast = document.getElementById('toast');
+    toast.textContent = msg;
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 2500);
+  }
+
+  /** Shake the input field for invalid submissions */
+  function shakeInput() {
+    const input = document.getElementById('userInput');
+    input.style.borderColor = '#e05c5c';
+    input.style.animation = 'none';
+    setTimeout(() => { input.style.borderColor = ''; }, 1000);
+  }
+
+  /** Escape HTML to prevent XSS when inserting resume text */
+  function escapeHtml(str) {
+    return str
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  }
+
+  /**
+   * Parse simple markdown-like formatting in bot messages:
+   * **text** → <strong>text</strong>
+   * *text* → <em>text</em>
+   * • text → bullet point
+   */
+  function parseMarkdown(text) {
+    return escapeHtml(text)
+      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*(.*?)\*/g, '<em>$1</em>')
+      .replace(/\n/g, '<br>');
+  }
+
+  // ----------------------------------------------------------------
+  // KEYBOARD SHORTCUT
+  // Enter = send message
+  // Shift+Enter = new line in textarea
+  // ----------------------------------------------------------------
+  document.getElementById('userInput').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();   // Prevent newline in textarea
+      sendMessage();
+    }
+  });
+
+  // Auto-resize textarea as user types
+  document.getElementById('userInput').addEventListener('input', function() {
+    this.style.height = 'auto';
+    this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+  });
+</script>
+
+</body>
+</html>

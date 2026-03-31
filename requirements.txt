@@ -1,0 +1,23 @@
+# requirements.txt
+# ==================
+# These are the Python packages needed to run the backend.
+# Install all of them at once with: pip install -r requirements.txt
+
+# Flask - The web framework that powers our API
+flask==3.0.0
+
+# flask-cors - Allows our frontend (different port) to call our backend
+flask-cors==4.0.0
+
+# python-dotenv - Loads environment variables from a .env file
+# (keeps your API key out of your code!)
+python-dotenv==1.0.0
+
+# openai - Official OpenAI Python client library
+# Only needed if you want AI-powered resume generation
+# The app works without it using the built-in template
+openai==1.12.0
+
+# gunicorn - Production-grade WSGI server (used when deploying to Render)
+# Don't use Flask's built-in server in production
+gunicorn==21.2.0
